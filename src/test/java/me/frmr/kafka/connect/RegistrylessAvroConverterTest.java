@@ -19,173 +19,166 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import org.apache.avro.io.DatumReader;
-import org.apache.avro.generic.GenericDatumReader;
+import org.apache.avro.io.Decoder;
+import org.apache.avro.io.DecoderFactory;
+import org.apache.avro.specific.SpecificDatumReader;
 import org.apache.avro.generic.GenericRecord;
-import org.apache.avro.file.DataFileReader;
-import org.apache.avro.file.SeekableByteArrayInput;
 import org.apache.commons.io.IOUtils;
-import org.apache.commons.io.FileUtils;
 import org.apache.kafka.connect.data.*;
 import org.junit.jupiter.api.Test;
+
+import java.io.ByteArrayInputStream;
 import java.io.File;
 import java.io.InputStream;
 import java.io.IOException;
-import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Map;
 
 class RegistrylessAvroConverterTest {
-  @Test
-  void configureWorksOnParsableSchema() {
-    // This only has to work in the project directory because this is a test. I'm not particularly
-    // concerned if it works when the tests are packaged in JAR form right now. If we start doing
-    // that then we'll do something clever-er.
-    String validSchemaPath = new File("src/test/resources/schema/dog.avsc").getAbsolutePath();
+	@Test
+	void configureWorksOnParsableSchema() {
+		String validSchemaPath = new File("src/test/resources/schema/person.avsc").getAbsolutePath();
 
-    RegistrylessAvroConverter sut = new RegistrylessAvroConverter();
-    Map<String, Object> settings = new HashMap<String, Object>();
-    settings.put("schema.path", validSchemaPath);
+		RegistrylessAvroConverter sut = new RegistrylessAvroConverter();
+		Map<String, Object> settings = new HashMap<String, Object>();
+		settings.put("schema.path", validSchemaPath);
 
-    sut.configure(settings, false);
-  }
+		sut.configure(settings, false);
+	}
 
-  @Test
-  void configureThrowsOnInvalidSchema() {
-    // This only has to work in the project directory because this is a test. I'm not particularly
-    // concerned if it works when the tests are packaged in JAR form right now. If we start doing
-    // that then we'll do something clever-er.
-    String invalidSchemaPath = new File("src/test/resources/schema/invalid.avsc").getAbsolutePath();
+	@Test
+	void configureThrowsOnInvalidSchema() {
+		String invalidSchemaPath = new File("src/test/resources/schema/invalid.avsc").getAbsolutePath();
 
-    RegistrylessAvroConverter sut = new RegistrylessAvroConverter();
-    Map<String, Object> settings = new HashMap<String, Object>();
-    settings.put("schema.path", invalidSchemaPath);
+		RegistrylessAvroConverter sut = new RegistrylessAvroConverter();
+		Map<String, Object> settings = new HashMap<String, Object>();
+		settings.put("schema.path", invalidSchemaPath);
 
-    Throwable resultingException = assertThrows(IllegalStateException.class, () -> sut.configure(settings, false));
-    assertEquals("Unable to parse Avro schema when starting RegistrylessAvroConverter", resultingException.getMessage());
-  }
+		Throwable resultingException = assertThrows(IllegalStateException.class, () -> sut.configure(settings, false));
+		assertEquals("Unable to parse Avro schema when starting RegistrylessAvroConverter",
+				resultingException.getMessage());
+	}
 
+	@Test
+	void fromConnectDataWorksWithBinaryEncoding() throws Exception {
+		File validSchema = new File("src/test/resources/schema/person.avsc");
 
-  @Test
-  void fromConnectDataWorksWithWriterSchema() throws Exception {
-    // This only has to work in the project directory because this is a test. I'm not particularly
-    // concerned if it works when the tests are packaged in JAR form right now. If we start doing
-    // that then we'll do something clever-er.
-    String validSchemaPath = new File("src/test/resources/schema/dog.avsc").getAbsolutePath();
+		RegistrylessAvroConverter sut = new RegistrylessAvroConverter();
+		Map<String, Object> settings = new HashMap<String, Object>();
+		settings.put("schema.path", validSchema.getAbsolutePath());
+		sut.configure(settings, false);
 
-    RegistrylessAvroConverter sut = new RegistrylessAvroConverter();
-    Map<String, Object> settings = new HashMap<String, Object>();
-    settings.put("schema.path", validSchemaPath);
-    sut.configure(settings, false);
+		Schema schema = SchemaBuilder.struct().name("Person").field("name", Schema.STRING_SCHEMA)
+				.field("id", Schema.STRING_SCHEMA).field("age", Schema.INT32_SCHEMA)
+				.field("birthDate", Schema.INT64_SCHEMA).build();
 
-    Schema dogSchema = SchemaBuilder.struct()
-      .name("dog")
-      .field("name", Schema.STRING_SCHEMA)
-      .field("breed", Schema.STRING_SCHEMA)
-      .build();
+		Struct struct = new Struct(schema).put("name", "Tony").put("id", "Iron Man").put("age", 50).put("birthDate",
+				(long) 1621016);
 
-    Struct dogStruct = new Struct(dogSchema)
-      .put("name", "Beamer")
-      .put("breed", "Boarder Collie");
+		byte[] result = sut.fromConnectData("test_topic", schema, struct);
 
-    byte[] result = sut.fromConnectData("test_topic", dogSchema, dogStruct);
+		DatumReader<GenericRecord> datumReader = new SpecificDatumReader<>(
+				new org.apache.avro.Schema.Parser().parse(validSchema));
+		GenericRecord instance = null;
+		try {
+			Decoder decoder = DecoderFactory.get().binaryDecoder(result, null);
+			instance = datumReader.read(null, decoder);
+			assertEquals("Tony", instance.get("name").toString());
+			assertEquals("Iron Man", instance.get("id").toString());
+			assertEquals(50, instance.get("age"));
+			assertEquals((long) 1621016, instance.get("birthDate"));
+		} catch (IOException ioe) {
+			throw new Exception("Failed to deserialize Avro data", ioe);
+		}
+	}
 
-    // This is a bit annoying but because of the way avro works - the resulting byte array isn't
-    // deterministic - so we need to read it back using the avro tools.
-    DatumReader<GenericRecord> datumReader = new GenericDatumReader<>();
-    GenericRecord instance = null;
-    try (
-      SeekableByteArrayInput sbai = new SeekableByteArrayInput(result);
-      DataFileReader<GenericRecord> dataFileReader = new DataFileReader<>(sbai, datumReader);
-    ) {
-      instance = dataFileReader.next();
+	@Test
+	void fromConnectDataWorksWithoutBinaryEncoding() throws Exception {
+		File validSchema = new File("src/test/resources/schema/person.avsc");
 
-      assertEquals("Beamer", instance.get("name").toString());
-      assertEquals("Boarder Collie", instance.get("breed").toString());
-    } catch (IOException ioe) {
-      throw new Exception("Failed to deserialize Avro data", ioe);
-    }
-  }
+		RegistrylessAvroConverter sut = new RegistrylessAvroConverter();
+		Map<String, Object> settings = new HashMap<String, Object>();
+		settings.put("schema.path", validSchema.getAbsolutePath());
+		settings.put("binaryencoding.enable", "false");
+		sut.configure(settings, false);
 
-  @Test
-  void fromConnectDataWorksWithoutWriterSchema() throws Exception {
-    RegistrylessAvroConverter sut = new RegistrylessAvroConverter();
-    Map<String, Object> settings = new HashMap<String, Object>();
-    sut.configure(settings, false);
+		Schema schema = SchemaBuilder.struct().name("Person").field("name", Schema.STRING_SCHEMA)
+				.field("id", Schema.STRING_SCHEMA).field("age", Schema.INT32_SCHEMA)
+				.field("birthDate", Schema.INT64_SCHEMA).build();
 
-    Schema dogSchema = SchemaBuilder.struct()
-      .name("dog")
-      .field("name", Schema.STRING_SCHEMA)
-      .field("breed", Schema.STRING_SCHEMA)
-      .build();
+		Struct struct = new Struct(schema).put("name", "Tony").put("id", "Iron Man").put("age", 50).put("birthDate",
+				(long) 1621016);
 
-    Struct dogStruct = new Struct(dogSchema)
-      .put("name", "Beamer")
-      .put("breed", "Boarder Collie");
+		byte[] result = sut.fromConnectData("test_topic", schema, struct);
+		System.out.println(new String(result));
+		DatumReader<GenericRecord> datumReader = new SpecificDatumReader<>(
+				new org.apache.avro.Schema.Parser().parse(validSchema));
+		GenericRecord instance = null;
+		try {
+			Decoder decoder = DecoderFactory.get().jsonDecoder(new org.apache.avro.Schema.Parser().parse(validSchema), new ByteArrayInputStream(result));
+			instance = datumReader.read(null, decoder);
+			assertEquals("Tony", instance.get("name").toString());
+			assertEquals("Iron Man", instance.get("id").toString());
+			assertEquals(50, instance.get("age"));
+			assertEquals((long) 1621016, instance.get("birthDate"));
+		} catch (IOException ioe) {
+			throw new Exception("Failed to deserialize Avro data", ioe);
+		}
+	}
+	
+	@Test
+	void toConnectDataWithBinaryEncoding() throws IOException {
+		InputStream in = this.getClass().getClassLoader().getResourceAsStream("data/binary/person.avro");
+		byte[] data = IOUtils.toByteArray(in);
 
-    byte[] result = sut.fromConnectData("test_topic", dogSchema, dogStruct);
+		String validSchemaPath = new File("src/test/resources/schema/person.avsc").getAbsolutePath();
 
-    // This is a bit annoying but because of the way avro works - the resulting byte array isn't
-    // deterministic - so we need to read it back using the avro tools.
-    DatumReader<GenericRecord> datumReader = new GenericDatumReader<>();
-    GenericRecord instance = null;
-    try (
-      SeekableByteArrayInput sbai = new SeekableByteArrayInput(result);
-      DataFileReader<GenericRecord> dataFileReader = new DataFileReader<>(sbai, datumReader);
-    ) {
-      instance = dataFileReader.next();
+		RegistrylessAvroConverter sut = new RegistrylessAvroConverter();
+		Map<String, Object> settings = new HashMap<String, Object>();
+		settings.put("schema.path", validSchemaPath);
+		sut.configure(settings, false);
 
-      assertEquals("Beamer", instance.get("name").toString());
-      assertEquals("Boarder Collie", instance.get("breed").toString());
-    } catch (IOException ioe) {
-      throw new Exception("Failed to deserialize Avro data", ioe);
-    }
-  }
+		SchemaAndValue sav = sut.toConnectData("test_topic", data);
 
-  @Test
-  void toConnectDataWorksWithReaderSchema() throws IOException {
-    InputStream dogDataStream = this.getClass().getClassLoader().getResourceAsStream("data/binary/beamer.avro");
-    byte[] dogData = IOUtils.toByteArray(dogDataStream);
+		Schema schema = sav.schema();
+		assertEquals(Schema.Type.STRING, schema.field("name").schema().type());
+		assertEquals(Schema.Type.STRING, schema.field("id").schema().type());
+		assertEquals(Schema.Type.INT32, schema.field("age").schema().type());
+		assertEquals(Schema.Type.INT64, schema.field("birthDate").schema().type());
 
-    // This only has to work in the project directory because this is a test. I'm not particularly
-    // concerned if it works when the tests are packaged in JAR form right now. If we start doing
-    // that then we'll do something clever-er.
-    String validSchemaPath = new File("src/test/resources/schema/dog.avsc").getAbsolutePath();
+		Struct struct = (Struct) sav.value();
+		assertEquals("Tony", struct.getString("name"));
+		assertEquals("Iron Man", struct.getString("id"));
+		assertEquals(50, struct.getInt32("age"));
+		assertEquals(1621016, struct.getInt64("birthDate"));
+	}
 
-    RegistrylessAvroConverter sut = new RegistrylessAvroConverter();
-    Map<String, Object> settings = new HashMap<String, Object>();
-    settings.put("schema.path", validSchemaPath);
-    sut.configure(settings, false);
+	@Test
+	void toConnectDataWithoutBinaryEncoding() throws IOException {
+		InputStream in = this.getClass().getClassLoader().getResourceAsStream("data/json/person.json");
+		byte[] data = IOUtils.toByteArray(in);
 
-    SchemaAndValue sav = sut.toConnectData("test_topic", dogData);
+		String validSchemaPath = new File("src/test/resources/schema/person.avsc").getAbsolutePath();
 
-    Schema dogSchema = sav.schema();
-    assertEquals(Schema.Type.STRUCT, dogSchema.type());
-    assertEquals(Schema.Type.STRING, dogSchema.field("name").schema().type());
-    assertEquals(Schema.Type.STRING, dogSchema.field("breed").schema().type());
+		RegistrylessAvroConverter sut = new RegistrylessAvroConverter();
+		Map<String, Object> settings = new HashMap<String, Object>();
+		settings.put("schema.path", validSchemaPath);
+		settings.put("binaryencoding.enable", "false");
+		sut.configure(settings, false);
 
-    Struct dogStruct = (Struct)sav.value();
-    assertEquals("Beamer", dogStruct.getString("name"));
-    assertEquals("Border Collie", dogStruct.getString("breed"));
-  }
+		SchemaAndValue sav = sut.toConnectData("test_topic", data);
 
-  @Test
-  void toConnectDataWorksWithoutReaderSchema() throws IOException {
-    InputStream dogDataStream = this.getClass().getClassLoader().getResourceAsStream("data/binary/beamer.avro");
-    byte[] dogData = IOUtils.toByteArray(dogDataStream);
+		Schema schema = sav.schema();
+		assertEquals(Schema.Type.STRING, schema.field("name").schema().type());
+		assertEquals(Schema.Type.STRING, schema.field("id").schema().type());
+		assertEquals(Schema.Type.INT32, schema.field("age").schema().type());
+		assertEquals(Schema.Type.INT64, schema.field("birthDate").schema().type());
 
-    RegistrylessAvroConverter sut = new RegistrylessAvroConverter();
-    Map<String, Object> settings = new HashMap<String, Object>();
-    sut.configure(settings, false);
+		Struct struct = (Struct) sav.value();
+		assertEquals("Tony", struct.getString("name"));
+		assertEquals("Iron Man", struct.getString("id"));
+		assertEquals(50, struct.getInt32("age"));
+		assertEquals(1621016, struct.getInt64("birthDate"));
+	}
 
-    SchemaAndValue sav = sut.toConnectData("test_topic", dogData);
-
-    Schema dogSchema = sav.schema();
-    assertEquals(Schema.Type.STRUCT, dogSchema.type());
-    assertEquals(Schema.Type.STRING, dogSchema.field("name").schema().type());
-    assertEquals(Schema.Type.STRING, dogSchema.field("breed").schema().type());
-
-    Struct dogStruct = (Struct)sav.value();
-    assertEquals("Beamer", dogStruct.getString("name"));
-    assertEquals("Border Collie", dogStruct.getString("breed"));
-  }
 }
