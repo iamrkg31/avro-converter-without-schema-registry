@@ -63,11 +63,8 @@ public class RegistrylessAvroConverter implements Converter {
 		}
 		avroDataHelper = new AvroData(schemaCacheSize);
 
-		logger.info("----------------------->"+configs.get("binaryencoding.enable").getClass());
 		if (configs.get("binaryencoding.enable") instanceof String) {
 			binaryEncoding = Boolean.parseBoolean((String) configs.get("binaryencoding.enable"));
-			logger.info("----------------------->"+(String) configs.get("binaryencoding.enable"));
-			logger.info("----------------------->"+binaryEncoding);
 		}
 		
 		if (configs.get("schema.path") instanceof String) {
