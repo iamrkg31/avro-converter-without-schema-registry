@@ -55,8 +55,8 @@ This converter uses Gradle. Building the project is as simple as:
 
 ## Producers to test the converter
 * Using binary encoding for serialization/deserialization - 
-  [link](https://github.com/iamrkg31/kafka/tree/main/kafka-consumer-producer)
-* Using plain JSON string (schema - [link](https://github.com/iamrkg31/avro-converter-without-schema-registry/blob/master/src/test/resources/schema/person.avsc))
+  [link](https://github.com/rahulkg31/kafka/tree/main/kafka-consumer-producer)
+* Using plain JSON string (schema - [link](https://github.com/rahulkg31/avro-converter-without-schema-registry/blob/master/src/test/resources/schema/person.avsc))
 ```
 bin/kafka-console-producer.sh --topic test_topic --bootstrap-server localhost:9092
 > {"name": "Tony","id": "Iron Man","age": 50,"birthDate": 1621016565}
@@ -74,4 +74,4 @@ bin/kafka-console-producer.sh --topic test_topic --bootstrap-server localhost:90
 This project is forked from github repository - [RegistrylessAvroConverter](https://github.com/farmdawgnation/registryless-avro-converter). All the credit goes to him for this amazing work. I have only tweaked a few things to meet my requirements.
 <br/><br/>
 Pull requests and issues are welcome! If you think you've spotted a problem or you just have a question do not hesitate
-to [open an issue](https://github.com/iamrkg31/avro-converter-without-schema-registry/issues/new).
+to [open an issue](https://github.com/rahulkg31/avro-converter-without-schema-registry/issues/new).
